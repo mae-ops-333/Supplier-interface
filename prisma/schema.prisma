@@ -1,14 +1,15 @@
 // Prisma schema for the OnlinePlanService Supplier/Manufacturer ad marketplace.
 //
-// Dev datasource is SQLite (zero setup, file-based). To move to Postgres for
-// production, change `provider` to "postgresql" and point `url` at a
-// DATABASE_URL like postgresql://... — no model changes are required.
+// Uses Postgres so the same DATABASE_URL works both locally and once
+// deployed (e.g. to Vercel) — a serverless host can't reliably persist a
+// SQLite file, so this project doesn't use one. A free Postgres instance
+// (e.g. from neon.tech) works fine for dev and small-scale production.
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

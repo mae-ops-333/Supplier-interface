@@ -13,21 +13,24 @@ narrow the audience. Checkout runs through a real payment portal (Stripe).
 ## Stack
 
 - **Next.js 15** (App Router) + TypeScript + Tailwind CSS 4
-- **Prisma 6** + SQLite for local dev (swap the datasource to Postgres for
-  production — no model changes needed)
+- **Prisma 6** + Postgres (a free instance from [neon.tech](https://neon.tech)
+  works well for both local dev and a small production deployment)
 - **Stripe** Checkout for payment
 - **Zod** for request validation
 - **Vitest** for the pricing engine's unit tests
 
 ## Getting started
 
-```bash
-npm install
-cp .env.example .env
-npx prisma migrate dev   # creates prisma/dev.db and applies migrations
-npm run db:seed          # loads zones, plan rooms, specialties, CSI spec sections
-npm run dev              # http://localhost:3000
-```
+1. Create a free Postgres database (e.g. at [neon.tech](https://neon.tech))
+   and copy its connection string.
+2. ```bash
+   npm install
+   cp .env.example .env
+   # paste your connection string into DATABASE_URL in .env
+   npm run db:push    # creates the tables
+   npm run db:seed    # loads zones, plan rooms, specialties, CSI spec sections
+   npm run dev        # http://localhost:3000
+   ```
 
 With `DEV_FAKE_PAYMENTS=true` (the `.env.example` default) and no Stripe
 keys set, checkout completes instantly without calling Stripe, so the whole
@@ -144,8 +147,8 @@ records each Stripe transaction; `AdCreative` holds the actual ad content.
 - `npm audit` reports a handful of high-severity advisories. All of them
   are in build-time-only tooling — `postcss` bundled inside Next's dev
   server, and `mysql2`/`deepmerge-ts` bundled inside Prisma's CLI for a
-  MySQL driver this project doesn't use (SQLite in dev, Postgres in prod)
-  — not in code that ships or runs in the deployed app.
+  MySQL driver this project doesn't use (it's Postgres-only) — not in code
+  that ships or runs in the deployed app.
 - Prisma's `latest` npm dist-tag currently points at an 8.0.0 release
   candidate that requires a driver-adapter config rewrite; this project
   pins the last stable 6.x release instead.
