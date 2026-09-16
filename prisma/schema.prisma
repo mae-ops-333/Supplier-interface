@@ -1,0 +1,228 @@
+// Prisma schema for the OnlinePlanService Supplier/Manufacturer ad marketplace.
+//
+// Dev datasource is SQLite (zero setup, file-based). To move to Postgres for
+// production, change `provider` to "postgresql" and point `url` at a
+// DATABASE_URL like postgresql://... — no model changes are required.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Advertisers (suppliers / manufacturers buying placements)
+// ---------------------------------------------------------------------------
+
+model Advertiser {
+  id          String     @id @default(cuid())
+  companyName String
+  contactName String
+  email       String     @unique
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  campaigns   Campaign[]
+}
+
+// ---------------------------------------------------------------------------
+// Reference data synced from OnlinePlanService (see lib/ops/*)
+// ---------------------------------------------------------------------------
+
+// A geographic coverage zone as defined by OnlinePlanService.
+model Zone {
+  id           String            @id @default(cuid())
+  opsZoneId    String            @unique // id in the OnlinePlanService system
+  code         String            @unique
+  name         String
+  region       String
+  planRooms    PlanRoom[]
+  campaignZone CampaignZone[]
+}
+
+// A single plan room (a project-bidding hub within a zone).
+model PlanRoom {
+  id               String             @id @default(cuid())
+  opsPlanRoomId    String             @unique // id in the OnlinePlanService system
+  name             String
+  city             String
+  state            String
+  zoneId           String
+  zone             Zone               @relation(fields: [zoneId], references: [id])
+  monthlyActiveGCs Int                @default(0) // monthly active general contractors/subs, used for reach estimates
+  campaignPlanRoom CampaignPlanRoom[]
+}
+
+// A trade specialty / division suppliers can target (Electrical, Plumbing...).
+model Specialty {
+  id                String              @id @default(cuid())
+  code              String              @unique
+  name              String
+  campaignSpecialty CampaignSpecialty[]
+}
+
+// A CSI MasterFormat spec section, used for the "intricate" targeting rules:
+// advertisers can restrict a placement to only projects whose specs include
+// this section, or to only users whose trade/spec responsibility matches it.
+model SpecSection {
+  id                  String                @id @default(cuid())
+  csiCode             String                @unique // e.g. "26 05 00"
+  divisionCode        String // e.g. "26"
+  divisionName        String // e.g. "Electrical"
+  title               String // e.g. "Common Work Results for Electrical"
+  campaignSpecSection CampaignSpecSection[]
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns (a purchased, unblockable "value-added information space")
+// ---------------------------------------------------------------------------
+
+enum CoverageScope {
+  NATIONWIDE
+  SELECTED_PLAN_ROOMS
+}
+
+enum TargetingMode {
+  NONE
+  PROJECT_SPEC_SECTION // only serve on projects whose specs include the selected section(s)
+  USER_SPEC_SECTION // only serve to users whose trade/spec responsibility matches the selected section(s)
+}
+
+enum CampaignStatus {
+  DRAFT
+  PENDING_PAYMENT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PROCESSING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model Campaign {
+  id           String         @id @default(cuid())
+  advertiserId String
+  advertiser   Advertiser     @relation(fields: [advertiserId], references: [id])
+  name         String
+  status       CampaignStatus @default(DRAFT)
+
+  // Step 1: coverage scope
+  scope CoverageScope @default(SELECTED_PLAN_ROOMS)
+
+  // Step 2: zones / plan rooms (only meaningful when scope = SELECTED_PLAN_ROOMS)
+  zones     CampaignZone[]
+  planRooms CampaignPlanRoom[]
+
+  // Step 3: timeline
+  startDate DateTime
+  endDate   DateTime
+
+  // Step 4: specialties
+  specialties CampaignSpecialty[]
+
+  // Step 5: advanced spec-section targeting
+  targetingMode TargetingMode         @default(NONE)
+  specSections  CampaignSpecSection[]
+
+  // Step 6: creative (the actual native, first-party ad content)
+  creative AdCreative?
+
+  // Pricing snapshot (in cents) computed by lib/pricing.ts at checkout time.
+  // surgeMultiplierBps stores the demand multiplier as basis points
+  // (10000 = 1.00x, 17500 = 1.75x) to avoid floating point in the DB.
+  basePriceCents          Int @default(0)
+  durationDiscountCents   Int @default(0)
+  specialtySurchargeCents Int @default(0)
+  targetingSurchargeCents Int @default(0)
+  surgeMultiplierBps      Int @default(10000)
+  surgeAdjustmentCents    Int @default(0)
+  totalPriceCents         Int @default(0)
+
+  // Step 7: payment
+  paymentStatus           PaymentStatus @default(UNPAID)
+  stripeCheckoutSessionId String?
+  stripePaymentIntentId   String?
+  payments                Payment[]
+
+  // Delivery analytics (server-side, first-party — see /api/placements/*)
+  impressionCount Int @default(0)
+  clickCount      Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AdCreative {
+  id         String   @id @default(cuid())
+  campaignId String   @unique
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  headline   String
+  body       String
+  imageUrl   String?
+  ctaLabel   String
+  ctaUrl     String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Join tables
+// ---------------------------------------------------------------------------
+
+model CampaignZone {
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  zoneId     String
+  zone       Zone     @relation(fields: [zoneId], references: [id])
+
+  @@id([campaignId, zoneId])
+}
+
+model CampaignPlanRoom {
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  planRoomId String
+  planRoom   PlanRoom @relation(fields: [planRoomId], references: [id])
+
+  @@id([campaignId, planRoomId])
+}
+
+model CampaignSpecialty {
+  campaignId  String
+  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  specialtyId String
+  specialty   Specialty @relation(fields: [specialtyId], references: [id])
+
+  @@id([campaignId, specialtyId])
+}
+
+model CampaignSpecSection {
+  campaignId    String
+  campaign      Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  specSectionId String
+  specSection   SpecSection @relation(fields: [specSectionId], references: [id])
+
+  @@id([campaignId, specSectionId])
+}
+
+// ---------------------------------------------------------------------------
+// Payments
+// ---------------------------------------------------------------------------
+
+model Payment {
+  id                    String        @id @default(cuid())
+  campaignId            String
+  campaign              Campaign      @relation(fields: [campaignId], references: [id])
+  stripePaymentIntentId String?       @unique
+  amountCents           Int
+  status                PaymentStatus @default(PROCESSING)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+}
